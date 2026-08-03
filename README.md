@@ -10,10 +10,11 @@ published on HuggingFace.
 - Python 3.10+, `pip install -r requirements.txt`
 - [COLMAP](https://colmap.github.io/) on `PATH` (step 3)
 - [labelCloud](https://github.com/ch-sa/labelCloud) (step 4a, 3D box annotation)
-- [CVAT](https://github.com/cvat-ai/cvat) self-hosted, or any tool that can
-  export YOLO-format 2D bounding boxes (step 4b)
-- A checkerboard-calibrated RGB camera (`cameraMatrix` / `distCoeffs` per the
-  standard OpenCV calibration routine, saved as `calib_color.npz`)
+- Any tool that can export YOLO-format 2D bounding boxes (step 4b), e.g. [CVAT](https://github.com/cvat-ai/cvat)
+- A checkerboard-calibrated RGB camera: run [OpenCV's standard camera
+  calibration routine](https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html)
+  once per camera and save the result as `calib_color.npz` with keys
+  `cameraMatrix` (3x3) and `distCoeffs` (1x5)
 
 ## Pipeline
 
@@ -61,9 +62,10 @@ images + camera model + `mesh_poisson.ply`)
   (`configs/labelcloud_config.ini` has the settings used for this dataset)
   and draw one bounding box per fruit. Export to
   `<labels_root>/<date>_<seq_id>_mesh_poisson.json`.
-- **2D box** -- import `<seq>/image/*.png` into CVAT, draw/track a bounding
-  box per visible fruit per frame, export as **YOLO 1.1** ->
-  `<seq>/annotation/<task_name>/obj_train_data/*.txt`.
+- **2D box** -- annotate a bounding box per visible fruit per frame in
+  `<seq>/image/*.png`, using whatever tool you prefer, and export in
+  **YOLO format** (one `class cx cy w h` line per box, normalized
+  coordinates) to `<seq>/annotation/<task_name>/obj_train_data/*.txt`.
 
 **5. Build the final dataset**
 ```
@@ -98,3 +100,33 @@ rather than per plant -- merge the per-plant files, rewriting `file_name` to
 
 See the docstring at the top of `05_build_dataset.py` for exactly how each
 field is derived (and validated against the released dataset).
+
+## Full example
+
+All five steps chained together for one recording session (`2026-01-19/000000`):
+
+```bash
+DATA_ROOT=~/straw6d_raw
+LABELS_ROOT=~/straw6d_labels
+OUTPUT_ROOT=~/straw6d_final
+
+# ~/straw6d_raw/2026-01-19/000000/{rgb_raw.mp4, calib_color.npz} already in place
+
+python 01_extract_frames.py --root $DATA_ROOT
+python 02_estimate_poses.py --root $DATA_ROOT
+./03_reconstruct.sh $DATA_ROOT/2026-01-19/000000
+
+# -- manual: annotate 3D box in labelCloud on
+#      $DATA_ROOT/2026-01-19/000000/dense/mesh_poisson.ply
+#    export to $LABELS_ROOT/2026-01-19_000000_mesh_poisson.json
+# -- manual: annotate 2D boxes (YOLO format) on
+#      $DATA_ROOT/2026-01-19/000000/image/*.png
+#    export to $DATA_ROOT/2026-01-19/000000/annotation/<task>/obj_train_data/*.txt
+
+python 05_build_dataset.py \
+    --data_root $DATA_ROOT \
+    --labels_root $LABELS_ROOT \
+    --output_root $OUTPUT_ROOT
+
+# -> $OUTPUT_ROOT/plant_001/000000.png, metadata.jsonl, ...
+```
