@@ -18,7 +18,7 @@ published on HuggingFace.
 
 ## Pipeline
 
-Each physical plant is recorded as one video clip (`rgb_raw.mp4`), organized as:
+Each physical plant is recorded as one video clip:
 
 ```
 <data_root>/<date>/<seq_id>/
@@ -26,107 +26,54 @@ Each physical plant is recorded as one video clip (`rgb_raw.mp4`), organized as:
   calib_color.npz
 ```
 
-**1. Extract frames**
+**1. Extract frames** -> `<seq_id>/image/000000.png, ...`
 ```
 python 01_extract_frames.py --root <data_root> [--frame_skip 5] [--cut_seconds 1.0]
 ```
-Drops the first/last `--cut_seconds` of each clip and keeps every
-`--frame_skip`-th remaining frame -> `<data_root>/<date>/<seq_id>/image/000000.png, ...`
 
-**2. Checkerboard PnP anchors**
+**2. Checkerboard PnP anchors** -> `<seq_id>/poses/refs.txt`
 ```
 python 02_estimate_poses.py --root <data_root> \
     [--pattern_cols 10] [--pattern_rows 7] [--square_size 0.025]
 ```
-Finds the checkerboard (`--pattern_cols`x`--pattern_rows` inner corners,
-`--square_size` meters per square) in whichever frames it's visible in and
-solves PnP to get metric camera centers for those frames. This does **not**
-produce the final per-frame poses -- it exists purely to give COLMAP's next
-step a metric scale and a common (chessboard) world frame.
--> `<data_root>/<date>/<seq_id>/poses/{distances_image.csv, poses_image.npz, refs.txt}`
+Gives step 3 a metric scale and world frame; not the final per-frame poses.
 
-**3. COLMAP reconstruction + metric alignment**
+**3. COLMAP reconstruction + metric alignment** -> `<seq_id>/dense/` (undistorted images, camera model, `mesh_poisson.ply`)
 ```
 ./03_reconstruct.sh <data_root>/<date>/<seq_id>
 ```
-Feature extraction -> exhaustive matching -> sparse mapping -> `model_aligner`
-(fits a similarity transform from step 2's anchors, resolving SfM's scale/
-gauge ambiguity) -> undistortion -> dense stereo -> Poisson mesh. Run once
-per sequence folder.
--> `<seq>/sparse/sparse_align/` (aligned sparse model), `<seq>/dense/` (undistorted
-images + camera model + `mesh_poisson.ply`)
 
 **4. Annotate (manual, not scripted)**
+- **3D box** in labelCloud on `<seq_id>/dense/mesh_poisson.ply` (`configs/labelcloud_config.ini`) -> `<labels_root>/<date>_<seq_id>_mesh_poisson.json`
+- **2D box** per frame on `<seq_id>/image/*.png`, any tool, exported as YOLO (`class cx cy w h`) -> `<seq_id>/annotation/<task_name>/obj_train_data/*.txt`
 
-- **3D box** -- open `<seq>/dense/mesh_poisson.ply` in labelCloud
-  (`configs/labelcloud_config.ini` has the settings used for this dataset)
-  and draw one bounding box per fruit. Export to
-  `<labels_root>/<date>_<seq_id>_mesh_poisson.json`.
-- **2D box** -- annotate a bounding box per visible fruit per frame in
-  `<seq>/image/*.png`, using whatever tool you prefer, and export in
-  **YOLO format** (one `class cx cy w h` line per box, normalized
-  coordinates) to `<seq>/annotation/<task_name>/obj_train_data/*.txt`.
-
-**5. Build the final dataset**
+**5. Build the final dataset** -> `<output_root>/plant_001/{000000.png, ..., metadata.jsonl}`
 ```
 python 05_build_dataset.py \
-    --data_root <data_root> \
-    --labels_root <labels_root> \
-    --output_root <output_root> \
+    --data_root <data_root> --labels_root <labels_root> --output_root <output_root> \
     [--raw_frame_width 640] [--raw_frame_height 480] \
-    [--min_bbox_area 200] [--border_margin 1] \
-    [--near_plane 0.05] [--match_max_dist 150]
+    [--min_bbox_area 200] [--border_margin 1] [--near_plane 0.05] [--match_max_dist 150]
 ```
-For every sequence that has both a 3D annotation and a 2D annotation, this
-combines labelCloud's box(es), CVAT's per-frame detections, and COLMAP's
-per-frame pose + intrinsics into one dataset per plant:
-
-```
-<output_root>/plant_001/000000.png
-<output_root>/plant_001/metadata.jsonl
-<output_root>/plant_002/...
-```
-
-`metadata.jsonl` has one row per image (HF imagefolder convention), with all
-pose/camera/bbox fields inline. One `plant_XXX` folder per reconstructed
-sequence (one physical plant each). Grouping/splitting these into
-train/val/test is left to the user -- the published dataset uses a
-plant-disjoint split (no plant's frames appear in more than one of
-train/validation/test), which is the split you should replicate if training
-against it. If assembling train/val/test splits for upload to HuggingFace,
-note that its imagefolder loader expects one `metadata.jsonl` per split
-rather than per plant -- merge the per-plant files, rewriting `file_name` to
-`<plant_id>/<image>.png`.
+One `plant_XXX` folder per sequence; `metadata.jsonl` has one row per image
+(HF imagefolder convention). Splitting into train/val/test is left to the
+user -- the published dataset uses a plant-disjoint split, which is what you
+should replicate. HF's imagefolder loader expects one `metadata.jsonl` per
+split rather than per plant, so merge the per-plant files first (rewriting
+`file_name` to `<plant_id>/<image>.png`).
 
 See the docstring at the top of `05_build_dataset.py` for exactly how each
 field is derived (and validated against the released dataset).
 
 ## Full example
 
-All five steps chained together for one recording session (`2026-01-19/000000`):
-
 ```bash
 DATA_ROOT=~/straw6d_raw
 LABELS_ROOT=~/straw6d_labels
 OUTPUT_ROOT=~/straw6d_final
 
-# ~/straw6d_raw/2026-01-19/000000/{rgb_raw.mp4, calib_color.npz} already in place
-
 python 01_extract_frames.py --root $DATA_ROOT
 python 02_estimate_poses.py --root $DATA_ROOT
 ./03_reconstruct.sh $DATA_ROOT/2026-01-19/000000
-
-# -- manual: annotate 3D box in labelCloud on
-#      $DATA_ROOT/2026-01-19/000000/dense/mesh_poisson.ply
-#    export to $LABELS_ROOT/2026-01-19_000000_mesh_poisson.json
-# -- manual: annotate 2D boxes (YOLO format) on
-#      $DATA_ROOT/2026-01-19/000000/image/*.png
-#    export to $DATA_ROOT/2026-01-19/000000/annotation/<task>/obj_train_data/*.txt
-
-python 05_build_dataset.py \
-    --data_root $DATA_ROOT \
-    --labels_root $LABELS_ROOT \
-    --output_root $OUTPUT_ROOT
-
-# -> $OUTPUT_ROOT/plant_001/000000.png, metadata.jsonl, ...
+# -- annotate (step 4) --
+python 05_build_dataset.py --data_root $DATA_ROOT --labels_root $LABELS_ROOT --output_root $OUTPUT_ROOT
 ```
