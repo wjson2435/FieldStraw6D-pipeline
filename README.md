@@ -32,8 +32,8 @@ Three root folders; everything below is produced by the step that's marked.
 <labels_root>/<date>_<seq_id>_mesh_poisson.json   step 4a (manual, 3D box)
 
 <output_root>/plant_XXX/           step 5 (final dataset, one folder per plant)
-  000.png, 001.png, ...
-  metadata.jsonl
+  rgb/000000.png, ...
+  json/000000.json, ...
 ```
 
 ## Pipeline
@@ -70,19 +70,17 @@ a single sequence.
 - **3D box** in labelCloud on `<seq_id>/dense/mesh_poisson.ply` (`configs/labelcloud_config.ini`) -> `<labels_root>/<date>_<seq_id>_mesh_poisson.json`
 - **2D box** per frame on `<seq_id>/image/*.png`, any tool, exported as YOLO (`class cx cy w h`) -> `<seq_id>/annotation/<task_name>/obj_train_data/*.txt`
 
-**5. Build the final dataset** -> `<output_root>/plant_001/{000000.png, ..., metadata.jsonl}`
+**5. Build the final dataset** -> `<output_root>/plant_001/{rgb/000000.png, json/000000.json}, ...`
 ```
 python 05_build_dataset.py \
     --data_root <data_root> --labels_root <labels_root> --output_root <output_root> \
     [--raw_frame_width 640] [--raw_frame_height 480] \
     [--min_bbox_area 200] [--border_margin 1] [--near_plane 0.05] [--match_max_dist 150]
 ```
-One `plant_XXX` folder per sequence; `metadata.jsonl` has one row per image
-(HF imagefolder convention). Splitting into train/val/test is left to the
+One `plant_XXX` folder per sequence, each image paired with its own
+`{camera_data, objects}` json. Splitting into train/val/test is left to the
 user -- the published dataset uses a plant-disjoint split, which is what you
-should replicate. HF's imagefolder loader expects one `metadata.jsonl` per
-split rather than per plant, so merge the per-plant files first (rewriting
-`file_name` to `<plant_id>/<image>.png`).
+should replicate.
 
 See the docstring at the top of `05_build_dataset.py` for exactly how each
 field is derived (and validated against the released dataset).

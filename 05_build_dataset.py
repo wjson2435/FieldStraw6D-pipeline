@@ -6,14 +6,13 @@ Step 5: assemble the final per-plant dataset from:
 
 This produces, per physical plant (one reconstructed sequence == one plant):
 
-  <output_root>/<plant_id>/000000.png, 000001.png, ...
-  <output_root>/<plant_id>/metadata.jsonl   (one row per image, HF imagefolder convention)
+  <output_root>/<plant_id>/rgb/000000.png, 000001.png, ...
+  <output_root>/<plant_id>/json/000000.json, ...   (one file per image)
 
-matching the schema used by the published Straw6D dataset on HuggingFace.
-(If you're assembling train/validation/test splits afterwards, HF's
-imagefolder loader expects one metadata.jsonl per split rather than per
-plant folder -- merge the per-plant files into a split-level one, with
-file_name rewritten to "<plant_id>/<image>.png", before uploading.)
+matching the per-image {camera_data, objects} schema used by the published
+Straw6D dataset (and directly loadable by the training code's dataset
+class). If you want to push a build to HuggingFace instead, convert this
+rgb/+json/ layout to imagefolder+metadata.jsonl there.
 
 Every per-frame conversion below (labelCloud's centroid/dimensions/rotations
 -> local_to_world_transform, YOLO bbox -> pixel bbox, COLMAP pose ->
@@ -183,9 +182,11 @@ def build_sequence(seq_root: Path, label_objects: list, out_root: Path, plant_id
     colmap_cameras = read_cameras_binary(dense_sparse / "cameras.bin")
     by_name = {im["name"]: im for im in colmap_images.values()}
 
-    out_dir = out_root / plant_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    rows = []
+    out_rgb = out_root / plant_id / "rgb"
+    out_json = out_root / plant_id / "json"
+    out_rgb.mkdir(parents=True, exist_ok=True)
+    out_json.mkdir(parents=True, exist_ok=True)
+    n_written = 0
 
     for yolo_txt in sorted(yolo_dir.glob("*.txt")):
         stem = yolo_txt.stem
@@ -214,10 +215,13 @@ def build_sequence(seq_root: Path, label_objects: list, out_root: Path, plant_id
         if not pairs:
             continue
 
-        camera_view_matrix = colmap_pose_to_view_matrix(colmap_im["qvec"], colmap_im["tvec"])
-        camera_projection_matrix = build_projection_matrix(fx, fy, width, height, cfg.near_plane)
-
-        labels, bboxes, sizes, centers, transforms = [], [], [], [], []
+        camera_data = {
+            "resolution": [width, height],
+            "intrinsics": {"fx": fx, "fy": fy, "cx": cx, "cy": cy},
+            "camera_view_matrix": colmap_pose_to_view_matrix(colmap_im["qvec"], colmap_im["tvec"]),
+            "camera_projection_matrix": build_projection_matrix(fx, fy, width, height, cfg.near_plane),
+        }
+        out_objects = []
         for obj_idx, bbox in pairs:
             x1, y1, x2, y2 = bbox
             if (x2 - x1) * (y2 - y1) < cfg.min_bbox_area:
@@ -226,37 +230,24 @@ def build_sequence(seq_root: Path, label_objects: list, out_root: Path, plant_id
                x2 >= width - cfg.border_margin or y2 >= height - cfg.border_margin:
                 continue
             local_to_world_transform, size_local = obj_poses[obj_idx]
-            labels.append("strawberry")
-            bboxes.append(bbox)
-            sizes.append(size_local)
-            centers.append([0.0, 0.0, 0.0])
-            transforms.append(local_to_world_transform)
-        if not labels:
+            out_objects.append({
+                "label": "strawberry",
+                "bbox_2d_loose": bbox,
+                "size_local": size_local,
+                "center_local": [0.0, 0.0, 0.0],
+                "local_to_world_transform": local_to_world_transform,
+            })
+        if not out_objects:
             continue  # every detection in this frame was filtered out
 
-        shutil.copy2(undistorted_img, out_dir / img_name)
-        rows.append({
-            "file_name": img_name,
-            "image_id": stem,
-            "resolution": [width, height],
-            "fx": fx, "fy": fy, "cx": cx, "cy": cy,
-            "camera_view_matrix": camera_view_matrix,
-            "camera_projection_matrix": camera_projection_matrix,
-            "labels": labels,
-            "bbox_2d_loose": bboxes,
-            "size_local": sizes,
-            "center_local": centers,
-            "local_to_world_transform": transforms,
-        })
+        out_json_path = out_json / f"{stem}.json"
+        out_json_path.write_text(json.dumps({"camera_data": camera_data, "objects": out_objects}, indent=2))
+        shutil.copy2(undistorted_img, out_rgb / img_name)
+        n_written += 1
 
-    if not rows:
-        shutil.rmtree(out_dir, ignore_errors=True)
-        return 0
-
-    with open(out_dir / "metadata.jsonl", "w") as f:
-        for r in rows:
-            f.write(json.dumps(r) + "\n")
-    return len(rows)
+    if n_written == 0:
+        shutil.rmtree(out_root / plant_id, ignore_errors=True)
+    return n_written
 
 
 def main():
