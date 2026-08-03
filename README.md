@@ -1,12 +1,9 @@
 # Straw6D data-collection pipeline
 
-Scripts used to build the real-world portion of [SonUF/Straw6D](https://huggingface.co/datasets/SonUF/Straw6D):
+Scripts used to build the real-world portion of [Straw6D](https://huggingface.co/datasets/WoojungSon/Straw6D):
 in-field video of a strawberry plant -> metrically-scaled 3D reconstruction ->
-manual 3D/2D annotation -> a per-plant `rgb/` + `json/` dataset folder, in the
-exact schema published on HuggingFace.
-
-This is the **data pipeline only**. Training/evaluation code lives in a
-separate repo.
+manual 3D/2D annotation -> a per-plant dataset folder, in the exact schema
+published on HuggingFace.
 
 ## Requirements
 
@@ -30,19 +27,21 @@ Each physical plant is recorded as one video clip (`rgb_raw.mp4`), organized as:
 
 **1. Extract frames**
 ```
-python 01_extract_frames.py --root <data_root>
+python 01_extract_frames.py --root <data_root> [--frame_skip 5] [--cut_seconds 1.0]
 ```
-Drops the first/last second of each clip and keeps every 5th remaining frame
--> `<data_root>/<date>/<seq_id>/image/000000.png, ...`
+Drops the first/last `--cut_seconds` of each clip and keeps every
+`--frame_skip`-th remaining frame -> `<data_root>/<date>/<seq_id>/image/000000.png, ...`
 
 **2. Checkerboard PnP anchors**
 ```
-python 02_estimate_poses.py --root <data_root>
+python 02_estimate_poses.py --root <data_root> \
+    [--pattern_cols 10] [--pattern_rows 7] [--square_size 0.025]
 ```
-Finds the checkerboard in whichever frames it's visible in and solves PnP to
-get metric camera centers for those frames. This does **not** produce the
-final per-frame poses -- it exists purely to give COLMAP's next step a
-metric scale and a common (chessboard) world frame.
+Finds the checkerboard (`--pattern_cols`x`--pattern_rows` inner corners,
+`--square_size` meters per square) in whichever frames it's visible in and
+solves PnP to get metric camera centers for those frames. This does **not**
+produce the final per-frame poses -- it exists purely to give COLMAP's next
+step a metric scale and a common (chessboard) world frame.
 -> `<data_root>/<date>/<seq_id>/poses/{distances_image.csv, poses_image.npz, refs.txt}`
 
 **3. COLMAP reconstruction + metric alignment**
@@ -71,33 +70,31 @@ images + camera model + `mesh_poisson.ply`)
 python 05_build_dataset.py \
     --data_root <data_root> \
     --labels_root <labels_root> \
-    --output_root <output_root>
+    --output_root <output_root> \
+    [--raw_frame_width 640] [--raw_frame_height 480] \
+    [--min_bbox_area 200] [--border_margin 1] \
+    [--near_plane 0.05] [--match_max_dist 150]
 ```
 For every sequence that has both a 3D annotation and a 2D annotation, this
 combines labelCloud's box(es), CVAT's per-frame detections, and COLMAP's
-per-frame pose + intrinsics into one JSON per frame, and copies the matching
-undistorted image alongside it:
+per-frame pose + intrinsics into one dataset per plant:
 
 ```
-<output_root>/plant_001/rgb/000000.png
-<output_root>/plant_001/json/000000.json
+<output_root>/plant_001/000000.png
+<output_root>/plant_001/metadata.jsonl
 <output_root>/plant_002/...
 ```
 
-One `plant_XXX` folder per reconstructed sequence (one physical plant each).
-Grouping/splitting these into train/val/test is left to the user --
-`SonUF/Straw6D` uses a plant-disjoint split (no plant's frames appear in more
-than one of train/validation/test), which is the split you should replicate
-if training against the released dataset.
-
-**Frame selection.** A frame is kept once it has one usable CVAT detection
-(min area + not clipped by the image border, see `MIN_BBOX_AREA`/
-`BORDER_MARGIN` in the script). This is a superset of what shipped in
-`SonUF/Straw6D` -- the original release applied one further manual/QC
-curation pass on top (mainly visible in multi-fruit sequences) that isn't
-reproduced here. Every field this script does compute is validated
-bit-exact against the release; it's only the "would a human have kept this
-particular frame" judgment call that isn't reconstructed.
+`metadata.jsonl` has one row per image (HF imagefolder convention), with all
+pose/camera/bbox fields inline. One `plant_XXX` folder per reconstructed
+sequence (one physical plant each). Grouping/splitting these into
+train/val/test is left to the user -- the published dataset uses a
+plant-disjoint split (no plant's frames appear in more than one of
+train/validation/test), which is the split you should replicate if training
+against it. If assembling train/val/test splits for upload to HuggingFace,
+note that its imagefolder loader expects one `metadata.jsonl` per split
+rather than per plant -- merge the per-plant files, rewriting `file_name` to
+`<plant_id>/<image>.png`.
 
 See the docstring at the top of `05_build_dataset.py` for exactly how each
 field is derived (and validated against the released dataset).

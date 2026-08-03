@@ -27,9 +27,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-PATTERN_SIZE = (10, 7)
-SQUARE_SIZE = 0.025  # meters
-
 
 def to_colmap_image_name(img_path: str) -> str:
     stem = Path(img_path).stem
@@ -39,7 +36,7 @@ def to_colmap_image_name(img_path: str) -> str:
     return f"{int(digits):06d}.png"
 
 
-def process_folder(root_folder: str):
+def process_folder(root_folder: str, pattern_size: tuple, square_size: float):
     calib_path = os.path.join(root_folder, "calib_color.npz")
     images_dir = os.path.join(root_folder, "image")
     if not os.path.exists(calib_path) or not os.path.isdir(images_dir):
@@ -52,9 +49,9 @@ def process_folder(root_folder: str):
     if dist_coeffs.ndim == 1:
         dist_coeffs = dist_coeffs.reshape(1, -1)
 
-    w, h = PATTERN_SIZE
+    w, h = pattern_size
     objp = np.zeros((w * h, 3), np.float32)
-    objp[:, :2] = np.mgrid[0:w, 0:h].T.reshape(-1, 2) * SQUARE_SIZE
+    objp[:, :2] = np.mgrid[0:w, 0:h].T.reshape(-1, 2) * square_size
 
     output_dir = os.path.join(root_folder, "poses")
     os.makedirs(output_dir, exist_ok=True)
@@ -78,7 +75,7 @@ def process_folder(root_folder: str):
             continue
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         found, corners = cv2.findChessboardCorners(
-            gray, PATTERN_SIZE, flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_FAST_CHECK
+            gray, pattern_size, flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_FAST_CHECK
         )
         if not found:
             continue
@@ -127,6 +124,9 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--root", type=str, required=True,
                     help="Root folder containing <date>/<seq_id>/{calib_color.npz,image/}")
+    p.add_argument("--pattern_cols", type=int, default=10, help="Checkerboard inner corners, columns")
+    p.add_argument("--pattern_rows", type=int, default=7, help="Checkerboard inner corners, rows")
+    p.add_argument("--square_size", type=float, default=0.025, help="Checkerboard square size, meters")
     args = p.parse_args()
 
     root_path = Path(args.root)
@@ -134,5 +134,5 @@ if __name__ == "__main__":
                   if d.is_dir() and (d / "calib_color.npz").exists() and (d / "image").is_dir()]
     print(f"Found {len(subfolders)} sequence folders")
     for sub in sorted(subfolders):
-        process_folder(str(sub))
+        process_folder(str(sub), (args.pattern_cols, args.pattern_rows), args.square_size)
     print("Done.")
