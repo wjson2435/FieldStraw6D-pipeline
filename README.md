@@ -16,6 +16,26 @@ published on HuggingFace.
   once per camera and save the result as `calib_color.npz` with keys
   `cameraMatrix` (3x3) and `distCoeffs` (1x5)
 
+## Data layout
+
+Three root folders; everything below is produced by the step that's marked.
+
+```
+<data_root>/<date>/<seq_id>/       one folder per recorded plant
+  rgb_raw.mp4, calib_color.npz       (input)
+  image/                             step 1
+  poses/                             step 2
+  sparse/0/, sparse/sparse_align/    step 3 (raw / metrically-aligned SfM)
+  dense/                             step 3 (undistorted images, camera model, mesh_poisson.ply)
+  annotation/<task>/obj_train_data/  step 4b (manual, 2D boxes)
+
+<labels_root>/<date>_<seq_id>_mesh_poisson.json   step 4a (manual, 3D box)
+
+<output_root>/plant_XXX/           step 5 (final dataset, one folder per plant)
+  000.png, 001.png, ...
+  metadata.jsonl
+```
+
 ## Pipeline
 
 Each physical plant is recorded as one video clip:
@@ -40,8 +60,11 @@ Gives step 3 a metric scale and world frame; not the final per-frame poses.
 
 **3. COLMAP reconstruction + metric alignment** -> `<seq_id>/dense/` (undistorted images, camera model, `mesh_poisson.ply`)
 ```
-./03_reconstruct.sh <data_root>/<date>/<seq_id>
+./03_reconstruct.sh --root <data_root> [--only <date>/<seq_id>]
 ```
+Runs every sequence that has `image/` + `poses/refs.txt`; a sequence that
+fails is logged and skipped rather than aborting the batch. `--only` reruns
+a single sequence.
 
 **4. Annotate (manual, not scripted)**
 - **3D box** in labelCloud on `<seq_id>/dense/mesh_poisson.ply` (`configs/labelcloud_config.ini`) -> `<labels_root>/<date>_<seq_id>_mesh_poisson.json`
@@ -73,7 +96,7 @@ OUTPUT_ROOT=~/straw6d_final
 
 python 01_extract_frames.py --root $DATA_ROOT
 python 02_estimate_poses.py --root $DATA_ROOT
-./03_reconstruct.sh $DATA_ROOT/2026-01-19/000000
+./03_reconstruct.sh --root $DATA_ROOT
 # -- annotate (step 4) --
 python 05_build_dataset.py --data_root $DATA_ROOT --labels_root $LABELS_ROOT --output_root $OUTPUT_ROOT
 ```
