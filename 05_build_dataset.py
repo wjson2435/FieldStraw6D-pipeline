@@ -30,7 +30,13 @@ Expected input layout, matching steps 1-4:
   <data_root>/<date>/<seq_id>/
     dense/sparse/{cameras.bin, images.bin}   # undistorted COLMAP model (step 3)
     dense/images/*.png                       # undistorted frames (step 3)
-    annotation/*/obj_train_data/*.txt        # CVAT YOLO 2D bbox export (step 4b)
+    annotation/*.txt                         # YOLO 2D bbox export (step 4b), any tool;
+                                              # one "class cx cy w h" line per fruit,
+                                              # normalized to the raw (pre-undistortion)
+                                              # frame size, one <frame_stem>.txt per frame.
+                                              # CVAT's default nested export layout
+                                              # (annotation/<task>/obj_train_data/) is also
+                                              # auto-detected -- see find_yolo_dir().
 
   <labels_root>/<date>_<seq_id>_mesh_poisson.json   # labelCloud export (step 4a)
 
@@ -121,8 +127,23 @@ def load_yolo_bboxes(txt_path: Path, raw_w: int, raw_h: int):
 
 
 def find_yolo_dir(seq_root: Path):
-    matches = list(seq_root.glob("annotation/*/obj_train_data"))
-    return matches[0] if matches else None
+    """Find the folder holding this sequence's YOLO .txt files. Checks, in
+    order: annotation/ itself (flat -- the recommended layout for any tool),
+    CVAT's default export layout (annotation/<task>/obj_train_data/, kept
+    for compatibility with existing CVAT exports), then any other folder
+    under annotation/ that directly contains .txt files."""
+    ann_root = seq_root / "annotation"
+    if not ann_root.is_dir():
+        return None
+    if list(ann_root.glob("*.txt")):
+        return ann_root
+    cvat_matches = list(ann_root.glob("*/obj_train_data"))
+    if cvat_matches:
+        return cvat_matches[0]
+    for d in sorted(p for p in ann_root.rglob("*") if p.is_dir()):
+        if list(d.glob("*.txt")):
+            return d
+    return None
 
 
 def load_label_objects(labels_root: Path, date: str, seq_id: str):
@@ -170,7 +191,7 @@ def build_sequence(seq_root: Path, label_objects: list, out_root: Path, plant_id
         print(f"[SKIP] {seq_root}: no undistorted COLMAP model (run step 3)")
         return 0
     if yolo_dir is None:
-        print(f"[SKIP] {seq_root}: no CVAT YOLO export under annotation/*/obj_train_data")
+        print(f"[SKIP] {seq_root}: no YOLO .txt files found under annotation/")
         return 0
 
     # one entry per fruit in this sequence (usually 1, occasionally 2-4)

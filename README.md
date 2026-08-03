@@ -27,7 +27,7 @@ Three root folders; everything below is produced by the step that's marked.
   poses/                             step 2
   sparse/0/, sparse/sparse_align/    step 3 (raw / metrically-aligned SfM)
   dense/                             step 3 (undistorted images, camera model, mesh_poisson.ply)
-  annotation/<task>/obj_train_data/  step 4b (manual, 2D boxes)
+  annotation/*.txt                   step 4b (manual, 2D boxes)
 
 <labels_root>/<date>_<seq_id>_mesh_poisson.json   step 4a (manual, 3D box)
 
@@ -68,7 +68,7 @@ a single sequence.
 
 **4. Annotate (manual, not scripted)**
 - **3D box** in labelCloud on `<seq_id>/dense/mesh_poisson.ply` (`configs/labelcloud_config.ini`) -> `<labels_root>/<date>_<seq_id>_mesh_poisson.json`
-- **2D box** per frame on `<seq_id>/image/*.png`, any tool, exported as YOLO (`class cx cy w h`) -> `<seq_id>/annotation/<task_name>/obj_train_data/*.txt`
+- **2D box** per frame on `<seq_id>/image/*.png`, any tool, exported as YOLO -> `<seq_id>/annotation/<frame_stem>.txt` (flat; CVAT's default nested `annotation/<task>/obj_train_data/` export is also auto-detected). One `class cx cy w h` line per visible fruit, coordinates normalized [0,1] to the **raw** (pre-undistortion, step-1) frame size -- class index is ignored (single category).
 
 **5. Build the final dataset** -> `<output_root>/plant_001/{rgb/000000.png, json/000000.json}, ...`
 ```
