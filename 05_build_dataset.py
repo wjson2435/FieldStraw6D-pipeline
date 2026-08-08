@@ -10,7 +10,7 @@ This produces, per physical plant (one reconstructed sequence == one plant):
   <output_root>/<plant_id>/json/000000.json, ...   (one file per image)
 
 matching the per-image {camera_data, objects} schema used by the published
-Straw6D dataset (and directly loadable by the training code's dataset
+FieldStraw6D dataset (and directly loadable by the training code's dataset
 class). If you want to push a build to HuggingFace instead, convert this
 rgb/+json/ layout to imagefolder+metadata.jsonl there.
 

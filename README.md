@@ -1,6 +1,6 @@
-# Straw6D data-collection pipeline
+# FieldStraw6D data-collection pipeline
 
-Scripts used to build the real-world portion of [Straw6D](https://huggingface.co/datasets/WoojungSon/Straw6D):
+Scripts used to build the real-world portion of [FieldStraw6D](https://huggingface.co/datasets/WoojungSon/FieldStraw6D):
 in-field video of a strawberry plant -> metrically-scaled 3D reconstruction ->
 manual 3D/2D annotation -> a per-plant dataset folder, in the exact schema
 published on HuggingFace.
